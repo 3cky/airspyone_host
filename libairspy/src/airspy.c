@@ -84,7 +84,9 @@ typedef struct airspy_device
 	airspy_sample_block_cb_fn callback;
 	volatile bool streaming;
 	volatile bool stop_requested;
+	volatile bool transfer_thread_started;
 	pthread_t transfer_thread;
+	volatile bool consumer_thread_started;
 	pthread_t consumer_thread;
 	pthread_cond_t consumer_cv;
 	pthread_mutex_t consumer_mp;
@@ -528,9 +530,16 @@ static int kill_io_threads(airspy_device_t* device)
 		pthread_mutex_lock(&device->consumer_mp);
 		pthread_cond_signal(&device->consumer_cv);
 		pthread_mutex_unlock(&device->consumer_mp);
-
-		pthread_join(device->transfer_thread, NULL);
-		pthread_join(device->consumer_thread, NULL);
+		if (device->transfer_thread_started)
+		{
+			pthread_join(device->transfer_thread, NULL);
+			device->transfer_thread_started = false;
+		}
+		if (device->consumer_thread_started)
+		{
+			pthread_join(device->consumer_thread, NULL);
+			device->consumer_thread_started = false;
+		}
 
 		libusb_handle_events_timeout_completed(device->usb_context, &timeout, NULL);
 	}
@@ -566,12 +575,14 @@ static int create_io_threads(airspy_device_t* device, airspy_sample_block_cb_fn 
 		{
 			return AIRSPY_ERROR_THREAD;
 		}
+		device->consumer_thread_started = true;
 
 		result = pthread_create(&device->transfer_thread, &attr, transfer_threadproc, device);
 		if (result != 0)
 		{
 			return AIRSPY_ERROR_THREAD;
 		}
+		device->transfer_thread_started = true;
 
 		pthread_attr_destroy(&attr);
 	}
